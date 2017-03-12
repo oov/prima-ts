@@ -48,7 +48,7 @@ describe('primar', function () {
         const printPatterns = false;
         const printChips = false;
         const m = new Mock();
-        return decomposer.decompose(16, m.parts, pattern => m.render(pattern)).then(p => {
+        return decomposer.decompose(16, m.parts, pattern => m.render(pattern), pattern => m.renderSolo(pattern)).then(p => {
             assert.equal(p.memory, 664480); // TODO: check actual result
             console.log(`memory: ${p.memory / 1024 | 0}KB`);
             return (printPatterns ? visualizeAllPattern(p) : Promise.resolve()).

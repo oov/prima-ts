@@ -1,4 +1,4 @@
-import Differ from './differ';
+import Regioner from './regioner';
 import { Slicer, Hashes, ChipMap } from './slicer';
 import * as bitarray from './bitarray';
 import * as pattern from './pattern';
@@ -30,11 +30,17 @@ class Decomposer {
         private readonly tileSize: number,
         private readonly patternSet: pattern.Set,
         private readonly renderFunc: RenderFunc,
+        private readonly renderSoloFunc: RenderFunc,
     ) { }
 
     // TODO: supports multiple patternSet?
-    static decompose(tileSize: number, patternSet: pattern.Set, renderFunc: RenderFunc): Promise<DecomposedImage> {
-        const d = new Decomposer(tileSize, patternSet, renderFunc);
+    static decompose(
+        tileSize: number,
+        patternSet: pattern.Set,
+        renderFunc: RenderFunc,
+        renderSoloFunc: RenderFunc
+    ): Promise<DecomposedImage> {
+        const d = new Decomposer(tileSize, patternSet, renderFunc, renderSoloFunc);
         return d.buildAreaMap().
             then(() => d.buildHashes()).
             then(patternHashes => new DecomposedImage(d.width, d.height, d.tileSize, patternHashes, d.chipMap));
@@ -42,10 +48,6 @@ class Decomposer {
 
     private render(parts: pattern.Pattern): Promise<RenderedImage> {
         return this.renderFunc(parts).then(image => {
-            if (isNaN(this.width)) {
-                this.width = image.width;
-                this.height = image.height;
-            }
             return this.slicer.slice(image).then(([hashes, partialChipMap]) => {
                 this.hashesMap.set(pattern.toIndexIncludingNone(parts, this.patternSet), hashes);
                 partialChipMap.forEach((v, i) => {
@@ -65,26 +67,32 @@ class Decomposer {
         });
     }
 
-    private buildAreaMap(): Promise<void> {
-        const tlieSize = this.tileSize;
-        const differ = new Differ(tlieSize);
-        const patternSet = this.patternSet;
-        const areaMap = this.areaMap;
-        return this.render(patternSet.map(() => -1)).then(baseImage => {
-            // Add the empty map to simplify latar processing.
-            this.areaMapLength =
-                ((baseImage.width + tlieSize - 1) / tlieSize | 0)
-                * ((baseImage.height + tlieSize - 1) / tlieSize | 0);
-            areaMap.set(0, new bitarray.BitArray(this.areaMapLength).buffer.buffer);
+    private renderSolo(parts: pattern.Pattern): Promise<RenderedImage> {
+        return this.renderSoloFunc(parts);
+    }
 
+    private buildAreaMap(): Promise<void> {
+        return this.render(this.patternSet.map(() => -1)).then(image => {
+            this.width = image.width;
+            this.height = image.height;
+
+            // Add the empty map to simplify latar processing.
+            const tlieSize = this.tileSize;
+            this.areaMapLength =
+                ((image.width + tlieSize - 1) / tlieSize | 0)
+                * ((image.height + tlieSize - 1) / tlieSize | 0);
+            this.areaMap.set(0, new bitarray.BitArray(this.areaMapLength).buffer.buffer);
+            return new Regioner(tlieSize);
+        }).then(regioner => {
+            const patternSet = this.patternSet;
+            const areaMap = this.areaMap;
             const promises: Promise<AreaMap>[] = [];
             patternSet.forEach((partsGroup, groupIndex) => {
-                const length = partsGroup.length;
-                for (let i = 0; i < length; ++i) {
+                for (let i = 0; i < partsGroup.length; ++i) {
                     const patternParts = patternSet.map((_, j) => j !== groupIndex ? -1 : i);
                     promises.push(
-                        this.render(patternParts)
-                            .then(otherImage => differ.generate(baseImage, otherImage))
+                        this.renderSolo(patternParts)
+                            .then(image => regioner.generate(image))
                             .then(diff => areaMap.set(pattern.toIndexIncludingNone(patternParts, patternSet), diff.buffer.buffer))
                     );
                 }
@@ -158,8 +166,8 @@ class Decomposer {
     }
 }
 
-export function decompose(tileSize: number, patternSet: pattern.Set, render: RenderFunc): Promise<DecomposedImage> {
-    return Decomposer.decompose(tileSize, patternSet, render);
+export function decompose(tileSize: number, patternSet: pattern.Set, render: RenderFunc, renderSolo: RenderFunc): Promise<DecomposedImage> {
+    return Decomposer.decompose(tileSize, patternSet, render, renderSolo);
 }
 
 export class DecomposedImage {
