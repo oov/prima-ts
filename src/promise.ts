@@ -14,7 +14,7 @@ export class PromiseWorker {
     private worker: Worker;
     private callbacks: ([(data: any) => void, (e: ErrorEvent) => void, number])[] = [];
 
-    private taskId = 0;
+    private taskIdCounter = 0;
     private tasks = new Map<number, EventListener>();
 
     constructor(url: string) {
@@ -60,9 +60,10 @@ export class PromiseWorker {
 
     postMessageWithEvent(message: any, events: EventListener, ports?: any): Promise<any> {
         return new Promise((resolve, reject) => {
-            this.callbacks.push([resolve, reject, ++this.taskId]);
-            this.tasks.set(this.taskId, events);
-            this.worker.postMessage([this.taskId, message], ports);
+            const taskId = ++this.taskIdCounter;
+            this.callbacks.push([resolve, reject, taskId]);
+            this.tasks.set(taskId, events);
+            this.worker.postMessage([taskId, message], ports);
         });
     }
 
