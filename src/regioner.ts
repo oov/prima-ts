@@ -38,7 +38,7 @@ export default class Regioner {
             width,
             height,
             tileSize,
-        }, [imageData.data.buffer]).then(e => new BitArray(e.data.buffer, e.data.length));
+        }, [imageData.data.buffer]).then(data => new BitArray(data.buffer, data.length));
     }
     get tasks(): number { return this.worker.waits; }
 
@@ -84,7 +84,7 @@ export default class Regioner {
 'use strict';
 var findRegion = ${Regioner._findRegion.toString()};
 onmessage = function(e){
-    var d = e.data;
+    var d = e.data[1];
     var ret = findRegion(d.image, d.width, d.height, d.tileSize);
     postMessage({buffer: ret[0], length: ret[1]}, [ret[0]]);
 };`], { type: 'text/javascript' }));
