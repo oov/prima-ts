@@ -20,11 +20,10 @@ class Decomposer {
 
     private readonly hashesMap: HashesMap = new Map();
     private readonly chipMap: ChipMap = new Map();
-    private readonly areaMap: AreaMap = new Map();
 
     private width = NaN;
     private height = NaN;
-    private areaMapLength = 0;
+    private numTiles = NaN;
 
     private constructor(
         private readonly tileSize: number,
@@ -41,9 +40,9 @@ class Decomposer {
         renderSoloFunc: RenderFunc
     ): Promise<DecomposedImage> {
         const d = new Decomposer(tileSize, patternSet, renderFunc, renderSoloFunc);
-        return d.buildAreaMap().
-            then(() => d.buildHashes()).
-            then(patternHashes => new DecomposedImage(d.width, d.height, d.tileSize, patternHashes, d.chipMap));
+        return d.buildAreaMap()
+            .then(areaMap => d.buildHashes(areaMap))
+            .then(patternHashes => new DecomposedImage(d.width, d.height, d.tileSize, patternHashes, d.chipMap));
     }
 
     private render(parts: pattern.Pattern): Promise<RenderedImage> {
@@ -71,21 +70,21 @@ class Decomposer {
         return this.renderSoloFunc(parts);
     }
 
-    private buildAreaMap(): Promise<void> {
+    private buildAreaMap(): Promise<AreaMap> {
         return this.render(this.patternSet.map(() => -1)).then(image => {
             this.width = image.width;
             this.height = image.height;
-
-            // Add the empty map to simplify latar processing.
-            const tlieSize = this.tileSize;
-            this.areaMapLength =
-                ((image.width + tlieSize - 1) / tlieSize | 0)
-                * ((image.height + tlieSize - 1) / tlieSize | 0);
-            this.areaMap.set(0, new bitarray.BitArray(this.areaMapLength).buffer.buffer);
-            return new Regioner(tlieSize);
+            const tileSize = this.tileSize;
+            this.numTiles =
+                ((image.width + tileSize - 1) / tileSize | 0)
+                * ((image.height + tileSize - 1) / tileSize | 0);
+            return new Regioner(tileSize);
         }).then(regioner => {
+            const areaMap: AreaMap = new Map();
+            // Add the empty map to simplify latar processing.
+            areaMap.set(0, new bitarray.BitArray(this.numTiles).buffer.buffer);
+
             const patternSet = this.patternSet;
-            const areaMap = this.areaMap;
             const promises: Promise<AreaMap>[] = [];
             patternSet.forEach((partsGroup, groupIndex) => {
                 for (let i = 0; i < partsGroup.length; ++i) {
@@ -97,14 +96,13 @@ class Decomposer {
                     );
                 }
             });
-            return Promise.all(promises).then(() => undefined);
+            return Promise.all(promises).then(() => areaMap);
         });
     }
 
     // TODO: This may take a very long time, so it need move to the worker.
     // For that, I'm already using ArrayBuffer instead of TypedArray in the everywhere.
-    private buildHashes(): Promise<Hashes[]> {
-        const areaMap = this.areaMap;
+    private buildHashes(areaMap: AreaMap): Promise<Hashes[]> {
         const patternSet = this.patternSet;
         const hashesMap = this.hashesMap;
         const patternLength = pattern.number(patternSet);
@@ -118,7 +116,6 @@ class Decomposer {
                     // report statistics
                     // console.log(`generatedByCache: ${byCache} / rendered: ${generated}`);
                     this.hashesMap.clear();
-                    this.areaMap.clear();
                     resolve(patternHashes);
                     return;
                 }
@@ -132,10 +129,10 @@ class Decomposer {
                     return new Uint32Array(ab);
                 });
 
+                const numTiles = this.numTiles;
                 const querying = new Map<number, Promise<RenderedImage>>();
-                const length = this.areaMapLength;
-                const hashes = new Uint32Array(length + 1 /* hash */);
-                for (let i = 0; i < length; ++i) {
+                const hashes = new Uint32Array(numTiles + 1 /* hash */);
+                for (let i = 0; i < numTiles; ++i) {
                     const sourceParts = patternAreaMap.map((area, j) => bitarray.get(area, i) ? patternParts[j] : -1);
                     const sourceIndex = pattern.toIndexIncludingNone(sourceParts, patternSet);
                     const refHashes = hashesMap.get(sourceIndex);
