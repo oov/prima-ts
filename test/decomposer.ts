@@ -12,9 +12,10 @@ function visualizeAllPattern(image: decomposer.DecomposedImage): Promise<void> {
             if (i >= length) {
                 return resolve();
             }
-            debugprint.putCanvasToConsole(image.render(i));
-            ++i;
-            Promise.resolve().then(render);
+            image.render(i).then(canvas => {
+                debugprint.putCanvasToConsole(canvas);
+                ++i;
+            }).then(render);
         };
         render();
     });

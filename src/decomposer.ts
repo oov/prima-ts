@@ -4,6 +4,7 @@ import * as bitarray from './bitarray';
 import * as pattern from './pattern';
 import * as crc32 from './crc32';
 import * as difference from './difference';
+import ArrayBufferStore from './arraybufferstore';
 
 type RenderedImage = HTMLImageElement | HTMLCanvasElement;
 
@@ -42,7 +43,7 @@ class Decomposer {
         const d = new Decomposer(tileSize, patternSet, renderFunc, renderSoloFunc);
         return d.buildAreaMap()
             .then(areaMap => d.buildHashes(areaMap))
-            .then(patternHashes => new DecomposedImage(d.width, d.height, d.tileSize, patternHashes, d.chipMap));
+            .then(([abstore, hashes]) => new DecomposedImage(d.width, d.height, d.tileSize, d.chipMap, hashes, abstore));
     }
 
     private render(parts: pattern.Pattern): Promise<RenderedImage> {
@@ -102,63 +103,66 @@ class Decomposer {
 
     // TODO: This may take a very long time, so it need move to the worker.
     // For that, I'm already using ArrayBuffer instead of TypedArray in the everywhere.
-    private buildHashes(areaMap: AreaMap): Promise<Hashes[]> {
+    private buildHashes(areaMap: AreaMap): Promise<[ArrayBufferStore, Uint32Array]> {
         const patternSet = this.patternSet;
         const hashesMap = this.hashesMap;
         const patternLength = pattern.number(patternSet);
-        const patternHashes: Hashes[] = new Array(patternLength);
+        const patternDiffHashes = new Uint32Array(patternLength);
         let patternIndex = 0;
         let byCache = 0, generated = 0;
         let retried = false;
-        return new Promise<Hashes[]>(resolve => {
-            const processNextPattern = () => {
-                if (patternIndex >= patternLength) {
-                    // report statistics
-                    // console.log(`generatedByCache: ${byCache} / rendered: ${generated}`);
-                    this.hashesMap.clear();
-                    resolve(patternHashes);
-                    return;
-                }
-                const patternParts = pattern.fromIndex(patternIndex, patternSet);
-                const patternAreaMap = patternParts.map((itemIndex, groupIndex) => {
-                    const index = pattern.toIndexIncludingNone(patternParts.map((_, i) => groupIndex === i ? itemIndex : -1), patternSet);
-                    const ab = areaMap.get(index);
-                    if (!ab) {
-                        throw new Error(`#${index} AreaMap not found.`);
+        return ArrayBufferStore.create('prima-hashes', true).then(abstore => {
+            return new Promise<[ArrayBufferStore, Uint32Array]>(resolve => {
+                const processNextPattern = () => {
+                    if (patternIndex >= patternLength) {
+                        // report statistics
+                        // console.log(`generatedByCache: ${byCache} / rendered: ${generated}`);
+                        this.hashesMap.clear();
+                        resolve([abstore, patternDiffHashes]);
+                        return;
                     }
-                    return new Uint32Array(ab);
-                });
+                    const parts = pattern.fromIndex(patternIndex, patternSet);
+                    const patternAreaMap = parts.map((itemIndex, groupIndex) => {
+                        const index = pattern.toIndexIncludingNone(parts.map((_, i) => groupIndex === i ? itemIndex : -1), patternSet);
+                        const ab = areaMap.get(index);
+                        if (!ab) {
+                            throw new Error(`#${index} AreaMap not found.`);
+                        }
+                        return new Uint32Array(ab);
+                    });
 
-                const numTiles = this.numTiles;
-                const querying = new Map<number, Promise<RenderedImage>>();
-                const hashes = new Uint32Array(numTiles + 1 /* hash */);
-                for (let i = 0; i < numTiles; ++i) {
-                    const sourceParts = patternAreaMap.map((area, j) => bitarray.get(area, i) ? patternParts[j] : -1);
-                    const sourceIndex = pattern.toIndexIncludingNone(sourceParts, patternSet);
-                    const refHashes = hashesMap.get(sourceIndex);
-                    if (refHashes) {
-                        hashes[i + 1] = new Uint32Array(refHashes)[i + 1];
-                        continue;
+                    const numTiles = this.numTiles;
+                    const querying = new Map<number, Promise<RenderedImage>>();
+                    const hashes = new Uint32Array(numTiles + 1 /* hash */);
+                    for (let i = 0; i < numTiles; ++i) {
+                        const sourceParts = patternAreaMap.map((area, j) => bitarray.get(area, i) ? parts[j] : -1);
+                        const sourceIndex = pattern.toIndexIncludingNone(sourceParts, patternSet);
+                        const refHashes = hashesMap.get(sourceIndex);
+                        if (refHashes) {
+                            hashes[i + 1] = new Uint32Array(refHashes)[i + 1];
+                            continue;
+                        }
+                        if (querying.has(sourceIndex)) {
+                            continue;
+                        }
+                        querying.set(sourceIndex, this.render(sourceParts));
                     }
-                    if (querying.has(sourceIndex)) {
-                        continue;
+                    if (querying.size > 0) {
+                        const promises: Promise<RenderedImage>[] = [];
+                        querying.forEach(v => promises.push(v));
+                        retried = true;
+                        Promise.all(promises).then(processNextPattern);
+                        return;
                     }
-                    querying.set(sourceIndex, this.render(sourceParts));
-                }
-                if (querying.size > 0) {
-                    const promises: Promise<RenderedImage>[] = [];
-                    querying.forEach(v => promises.push(v));
-                    retried = true;
-                    Promise.all(promises).then(processNextPattern);
-                    return;
-                }
-                hashes[0] = difference.calcHash(new Uint32Array(hashes.buffer, 4));
-                patternHashes[patternIndex++] = hashes.buffer;
-                retried ? ++generated : ++byCache;
-                retried = false;
-                Promise.resolve().then(processNextPattern);
-            };
-            processNextPattern();
+                    hashes[0] = difference.calcHash(new Uint32Array(hashes.buffer, 4));
+                    patternDiffHashes[patternIndex] = hashes[0];
+                    retried ? ++generated : ++byCache;
+                    retried = false;
+                    abstore.set(patternIndex, hashes.buffer).then(processNextPattern);
+                    ++patternIndex;
+                };
+                processNextPattern();
+            });
         });
     }
 }
@@ -169,7 +173,7 @@ export function decompose(tileSize: number, patternSet: pattern.Set, render: Ren
 
 export class DecomposedImage {
     get length(): number {
-        return this.hashes.length;
+        return this.patternDiffHashes.length;
     }
 
     get memory(): number {
@@ -179,7 +183,7 @@ export class DecomposedImage {
             + tileSize * tileSize * 4 /* chip(RGBA) */
             + 8 /* map key */
         );
-        const hashSize = this.hashes.length * (
+        const hashSize = this.patternDiffHashes.length * (
             ((this.width + tileSize - 1) / tileSize | 0)
             * ((this.height + tileSize - 1) / tileSize | 0)
             * 4 /* Uint32 */ + 4 /* hash */ + 8 /* map key */
@@ -191,32 +195,41 @@ export class DecomposedImage {
         public readonly width: number,
         public readonly height: number,
         public readonly tileSize: number,
-        public readonly hashes: Hashes[],
         public readonly chipMap: ChipMap,
+        public readonly patternDiffHashes: Uint32Array,
+        private readonly abstore: ArrayBufferStore,
     ) {
         if (width <= 0 || height <= 0) {
             throw new Error(`invalid image size: ${width}x${height}`);
         }
     }
 
+    getPatternHashes(patternIndex: pattern.Index): Promise<Uint32Array> {
+        return this.abstore.get(patternIndex).then(b => new Uint32Array(b, 4));
+    }
+
+    popPatternHashes(patternIndex: pattern.Index): Promise<Uint32Array> {
+        return this.abstore.pop(patternIndex).then(b => new Uint32Array(b, 4));
+    }
     // useful for debugging
-    render(patternIndex: pattern.Index): HTMLCanvasElement {
-        const hashesBuffer = this.hashes[patternIndex];
-        const hashes = new Uint32Array(hashesBuffer, 4);
-        const width = this.width, height = this.height, tileSize = this.tileSize;
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!(ctx instanceof CanvasRenderingContext2D)) {
-            throw new Error('could not get CanvasRenderingContext2D');
-        }
-        for (let y = 0, i = 0; y < height; y += tileSize) {
-            for (let x = 0; x < width; x += tileSize) {
-                ctx.putImageData(this.getChipImage(hashes[i++]), x, y);
+    render(patternIndex: pattern.Index): Promise<HTMLCanvasElement> {
+        return this.abstore.get(patternIndex).then(hashesBuffer => {
+            const hashes = new Uint32Array(hashesBuffer, 4);
+            const width = this.width, height = this.height, tileSize = this.tileSize;
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (!(ctx instanceof CanvasRenderingContext2D)) {
+                throw new Error('could not get CanvasRenderingContext2D');
             }
-        }
-        return canvas;
+            for (let y = 0, i = 0; y < height; y += tileSize) {
+                for (let x = 0; x < width; x += tileSize) {
+                    ctx.putImageData(this.getChipImage(hashes[i++]), x, y);
+                }
+            }
+            return canvas;
+        });
     }
 
     getChipImage(hash: crc32.Hash): ImageData {
@@ -258,16 +271,15 @@ export class DecomposedImage {
     }
 
     getPatternIndices(): Uint32Array {
-        const hashes = this.hashes;
+        const hashes = this.patternDiffHashes;
         const length = hashes.length;
         const a = new Uint32Array(length);
         for (let i = 0; i < length; ++i) {
             a[i] = i;
         }
-        const comparer = difference.getComparer(new Uint32Array(hashes[0])[0]);
+        const comparer = difference.getComparer(hashes[0]);
         a.sort((a, b) => {
-            const ha = new Uint32Array(hashes[a])[0];
-            const hb = new Uint32Array(hashes[b])[0];
+            const ha = hashes[a], hb = hashes[b];
             const r = comparer(ha, hb);
             if (r !== 0) {
                 return r;
