@@ -20,18 +20,16 @@ export class PromiseWorker {
     constructor(url: string) {
         this.worker = new Worker(url);
         this.worker.onmessage = e => {
-            if (e.data) {
-                if (isNotify(e.data)) {
-                    const [taskId, eventName, data] = e.data;
-                    const el = this.tasks.get(taskId);
-                    if (el) {
-                        const f = el[eventName];
-                        if (f) {
-                            f(data);
-                        }
+            if (e.data && isNotify(e.data)) {
+                const [taskId, eventName, data] = e.data;
+                const el = this.tasks.get(taskId);
+                if (el) {
+                    const f = el[eventName];
+                    if (f) {
+                        f(data);
                     }
-                    return;
                 }
+                return;
             }
 
             const callback = this.callbacks.shift();
