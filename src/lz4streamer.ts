@@ -1,7 +1,7 @@
 import { ThrottlePromiseWorker } from './promise';
 
 declare var require: (name: string) => string;
-const rawLZ4Definition = require('raw-loader!./lz4/lz4.js');
+const rawLZ4Definition = require('raw-loader!uglify-loader!./lz4/src/lz4');
 
 function copy(dest: Uint8Array, src: Uint8Array, di: number, si: number, len: number) {
     for (let i = 0; i < len; ++i) {
@@ -50,7 +50,7 @@ class CompressWorker {
         }
         CompressWorker.workerURL = URL.createObjectURL(new Blob([`
 'use strict';
-${rawLZ4Definition}
+var LZ4 = (function(exports){${rawLZ4Definition}return exports;})({});
 var compBuffer = undefined;
 var compress = ${CompressWorker._compress.toString()};
 onmessage = function(e){
