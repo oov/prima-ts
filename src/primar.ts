@@ -67,10 +67,10 @@ function buildPattern(image: DecomposedImage, chipsMap: Map<number, number>): Pr
         let patternIndex = 0;
         const next = () => {
             if (patternIndex >= numPatterns) {
-                return resolve([patternMap.buffer, streamer]);
+                return image.abstore.clean().then(() => resolve([patternMap.buffer, streamer]));
             }
             patternMap.setUint32(patternIndices[patternIndex] * 4, patternIndex, true);
-            image.popPatternHashes(patternIndices[patternIndex]).then(hashes => {
+            image.getPatternHashes(patternIndices[patternIndex]).then(hashes => {
                 const indices = new Uint32Array(hashes.length);
                 hashes.forEach((hash, i) => indices[i] = chipsMap.get(hash)! + 1);
                 ++patternIndex;
