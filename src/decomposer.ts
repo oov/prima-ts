@@ -114,16 +114,17 @@ class Decomposer {
         areaMap: AreaMap,
         progress: (cur: number, total: number) => Promise<void>,
     ): Promise<[ArrayBufferStore, Uint32Array]> {
-        const patternSet = this.patternSet;
-        const hashesMap = this.hashesMap;
-        const patternLength = pattern.number(patternSet);
-        const patternDiffHashes = new Uint32Array(patternLength);
-        let patternIndex = 0;
-        let byCache = 0, generated = 0;
-        let retried = false;
         return ArrayBufferStore.create('prima-hashes', true).then(abstore => {
             const writer = abstore.bulkWriter(100 * 1024 * 1024 / ((this.numTiles + 1) * 4) | 0);
             return new Promise<[ArrayBufferStore, Uint32Array]>(resolve => {
+                const patternSet = this.patternSet;
+                const hashesMap = this.hashesMap;
+                const patternLength = pattern.number(patternSet);
+                const patternDiffHashes = new Uint32Array(patternLength);
+                let patternIndex = 0;
+                let byCache = 0, generated = 0;
+                let retried = false;
+                let lastReportTime = 0;
                 const processNextPattern = () => {
                     if (patternIndex >= patternLength) {
                         // report statistics
@@ -173,7 +174,13 @@ class Decomposer {
                     patternDiffHashes[patternIndex] = hashes[0];
                     retried ? ++generated : ++byCache;
                     retried = false;
-                    writer.set(patternIndex, hashes.buffer).then(() => progress(++patternIndex, patternLength)).then(processNextPattern);
+                    writer.set(patternIndex, hashes.buffer).then(() => {
+                        const n = Date.now();
+                        if (n - lastReportTime > 100) {
+                            progress(++patternIndex, patternLength);
+                            lastReportTime = n;
+                        }
+                    }).then(processNextPattern);
                 };
                 processNextPattern();
             });
