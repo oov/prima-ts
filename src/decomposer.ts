@@ -145,8 +145,12 @@ class Decomposer {
                     const numTiles = this.numTiles;
                     const querying = new Map<number, Promise<RenderedImage>>();
                     const hashes = new Uint32Array(numTiles + 1 /* hash */);
+                    const partsLength = patternAreaMap.length;
                     for (let i = 0; i < numTiles; ++i) {
-                        const sourceParts = patternAreaMap.map((area, j) => bitarray.get(area, i) ? parts[j] : -1);
+                        const sourceParts: number[] = new Array(partsLength);
+                        for (let j = 0; j < partsLength; ++j) {
+                            sourceParts[j] = bitarray.get(patternAreaMap[j], i) ? parts[j] : -1;
+                        }
                         const sourceIndex = pattern.toIndexIncludingNone(sourceParts, patternSet);
                         const refHashes = hashesMap.get(sourceIndex);
                         if (refHashes) {
