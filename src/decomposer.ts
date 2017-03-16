@@ -189,7 +189,7 @@ class Decomposer {
                     writer.set(patternIndex, hashes.buffer).then(() => {
                         ++patternIndex;
                         const n = Date.now();
-                        if (n - lastReportTime > 100) {
+                        if (n - lastReportTime > 400) {
                             lastReportTime = n;
                             return progress(patternIndex, patternLength);
                         }
