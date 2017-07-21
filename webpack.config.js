@@ -1,9 +1,9 @@
 module.exports = {
     entry: './index.ts',
     output: {
-        filename: './index.js',
-	library: 'Prima',
-	libraryTarget: 'umd'
+        filename: './prima.js',
+        library: 'Prima',
+        libraryTarget: 'umd'
     },
     resolve: {
         extensions: ['.webpack.js', '.web.js', '.ts', '.tsx', '.js']
