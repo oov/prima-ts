@@ -1,20 +1,16 @@
 module.exports = {
-    entry: './src/main.ts',
+    entry: './index.ts',
     output: {
-        filename: './js/index.js',
+        filename: './index.js',
     },
     resolve: {
-        extensions: ['', '.webpack.js', '.web.js', '.ts', '.tsx', '.js']
+        extensions: ['.webpack.js', '.web.js', '.ts', '.tsx', '.js']
     },
     module: {
         loaders: [{
                 test: /\.tsx?$/,
                 loader: 'ts-loader'
-            },
-            {
-                test: /\.txt$/,
-                loader: 'raw-loader'
-            },
+            }
         ]
     }
 };

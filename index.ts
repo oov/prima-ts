@@ -1,8 +1,8 @@
-import * as pattern from './pattern';
-import * as decomposer from '../src/decomposer';
-import * as primar from '../src/primar';
+import * as pattern from './src/pattern';
+import * as decomposer from './src/decomposer';
+import * as primar from './src/primar';
 
-export function generate(
+export default async function generate(
     tileSize: number,
     caption: pattern.Caption,
     patternSet: pattern.Set,
@@ -10,11 +10,12 @@ export function generate(
     renderSolo: (patternParts: number[]) => Promise<HTMLImageElement | HTMLCanvasElement>,
     progress: (phase: number, cur: number, total: number) => Promise<void>,
 ): Promise<Blob> {
-    return decomposer.decompose(
+    const image = await decomposer.decompose(
         tileSize,
         patternSet,
         pattern => render(pattern),
         pattern => renderSolo(pattern),
         progress,
-    ).then(image => primar.generate(image, patternSet, (cur, total) => progress(2, cur, total)));
+    );
+    return primar.generate(image, patternSet, (cur, total) => progress(2, cur, total));
 }

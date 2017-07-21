@@ -1,22 +1,22 @@
 import { ThrottlePromiseWorker } from './promise';
 
 declare var require: (name: string) => string;
-const rawLZ4Definition = require('raw-loader!uglify-loader!./lz4/src/lz4');
+const rawLZ4Definition = require('raw-loader!uglify-loader!lz4/lz4.js');
 
-function copy(dest: Uint8Array, src: Uint8Array, di: number, si: number, len: number) {
+function copy(dest: Uint8Array, src: Uint8Array, di: number, si: number, len: number): void {
     for (let i = 0; i < len; ++i) {
         dest[di++] = src[si++];
     }
 }
 
-function copyInt32(dest: Uint8Array, src: Int32Array, di: number, si: number, lenBytes: number) {
+function copyInt32(dest: Uint8Array, src: Int32Array, di: number, si: number, lenBytes: number): void {
     const dv = new DataView(dest.buffer);
     for (const diEnd = di + lenBytes; di < diEnd; di += 4, ++si) {
         dv.setInt32(di, src[si], true);
     }
 }
 
-function fillZero(dest: Uint8Array, di: number, len: number) {
+function fillZero(dest: Uint8Array, di: number, len: number): void {
     for (let i = 0; i < len; ++i) {
         dest[di++] = 0;
     }
@@ -50,7 +50,7 @@ class CompressWorker {
         }
         CompressWorker.workerURL = URL.createObjectURL(new Blob([`
 'use strict';
-var LZ4 = (function(exports){${rawLZ4Definition}return exports;})({});
+${rawLZ4Definition}
 var compBuffer = undefined;
 var compress = ${CompressWorker._compress.toString()};
 onmessage = function(e){
@@ -123,45 +123,44 @@ export default class Streamer {
         }
     }
 
-    public finish(): Promise<[ArrayBuffer[], number]> {
+    public async finish(): Promise<[ArrayBuffer[], number]> {
         if (this.used !== 0) {
             this.compress(this.used);
         }
-        return Promise.all(this.buffers).then(r => {
-            const abs: ArrayBuffer[] = [];
-            let totalSize = 0;
+        const r = await Promise.all(this.buffers);
+        const abs: ArrayBuffer[] = [];
+        let totalSize = 0;
 
-            const header = new ArrayBuffer(7);
-            const dv = new DataView(header);
-            dv.setUint32(0, 0x184d2204, true);
-            switch (this.bufferSize) {
-                case 1024 * 1024:
-                    dv.setUint8(4, 0x60);
-                    dv.setUint8(5, 0x60);
-                    dv.setUint8(6, 0x51);
-                    break;
-                case 4 * 1024 * 1024:
-                    dv.setUint8(4, 0x60);
-                    dv.setUint8(5, 0x70);
-                    dv.setUint8(6, 0x73);
-                    break;
-            }
-            abs.push(header);
-            totalSize += header.byteLength;
+        const header = new ArrayBuffer(7);
+        const dv = new DataView(header);
+        dv.setUint32(0, 0x184d2204, true);
+        switch (this.bufferSize) {
+            case 1024 * 1024:
+                dv.setUint8(4, 0x60);
+                dv.setUint8(5, 0x60);
+                dv.setUint8(6, 0x51);
+                break;
+            case 4 * 1024 * 1024:
+                dv.setUint8(4, 0x60);
+                dv.setUint8(5, 0x70);
+                dv.setUint8(6, 0x73);
+                break;
+        }
+        abs.push(header);
+        totalSize += header.byteLength;
 
-            for (const [ab, success] of r) {
-                const size = new ArrayBuffer(4);
-                new DataView(size).setUint32(0, ab.byteLength | (success ? 0 : 0x80000000), true);
-                abs.push(size, ab);
-                totalSize += size.byteLength + ab.byteLength;
-            }
+        for (const [ab, success] of r) {
+            const size = new ArrayBuffer(4);
+            new DataView(size).setUint32(0, ab.byteLength | (success ? 0 : 0x80000000), true);
+            abs.push(size, ab);
+            totalSize += size.byteLength + ab.byteLength;
+        }
 
-            // end marker
-            abs.push(new ArrayBuffer(4));
-            totalSize += 4;
+        // end marker
+        abs.push(new ArrayBuffer(4));
+        totalSize += 4;
 
-            return [abs, totalSize];
-        });
+        return [abs, totalSize];
     }
 }
 
