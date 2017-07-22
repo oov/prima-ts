@@ -2,7 +2,7 @@
   "name": "prima",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "index.ts",
   "dependencies": {
     "lz4": "git+https://github.com/oov/lz4-ts.git"
   },
